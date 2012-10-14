@@ -1,0 +1,38 @@
+
+// Compass
+// ===========================================================================>
+
+// Configuration
+// --------------------------------------------------------------------------->
+// TODO: Turn on all neccessary configuration flags
+// See <http://compass-style.org/reference/compass/support/>
+
+// Modules
+// --------------------------------------------------------------------------->
+@import "compass";
+@import "compass/css3/user-interface";
+
+// Reset
+// --------------------------------------------------------------------------->
+// TODO: Do we even need to do this with bootstrap ?
+// @import "compass/reset"
+
+// Bootstrap
+// ===========================================================================>
+
+// Configuration
+// --------------------------------------------------------------------------->
+$fontAwesomePath: "/fonts/fontawesome-webfont";
+
+// Modules
+// --------------------------------------------------------------------------->
+@import "vendor/bootstrap/bootstrap_awesome";
+@import "vendor/bootstrap/bootstrap_responsive";
+
+// Local
+// ===========================================================================>
+
+// Configuration
+// --------------------------------------------------------------------------->
+// TODO: All variables should be declared here and minimized to be DRY
+//       Keep layout and color separated as much as sanely possible.
