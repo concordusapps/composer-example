@@ -1,0 +1,5 @@
+# Generated files
+/temp
+/dist
+/.sass-cache
+/node_modules
