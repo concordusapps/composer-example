@@ -23,7 +23,7 @@ module.exports = function(grunt) {
                 },
                 options: {
                     basePath: 'app/scripts',
-                    bare: false
+                    bare: true
                 }
             }
         },
@@ -36,8 +36,7 @@ module.exports = function(grunt) {
                     images_dir: 'app/images',
                     css_dir: 'temp/styles',
                     javascripts_dir: 'temp/scripts',
-                    force: true,
-                    require: 'susy'
+                    force: true
                 }
             }
         },
@@ -124,7 +123,7 @@ module.exports = function(grunt) {
 
         // renames files to prepend a vesioned hash of their contents
         rev: {
-            js: 'scripts/**/*.js',
+            // js: 'scripts/**/*.js',
             css: 'styles/**/*.css',
             img: '../images/**'
         },
@@ -146,18 +145,15 @@ module.exports = function(grunt) {
 
         // Optimizes JPGs and PNGs (with jpegtran & optipng)
         img: {
-            dist: '<config:rev.img>'
+            dist: '../images/**'
         },
 
         // <http://requirejs.org/docs/optimization.html>
         rjs: {
-            mainConfigFile: './scripts/main.js',
-            name: 'main',
             optimize: 'none',
             baseUrl: './scripts',
-            wrap: false,
-            findNestedDependencies: true,
-            removeCombined: true
+            name: 'main',
+            wrap: false
         },
 
         // while Yeoman handles concat/min when using

@@ -25,7 +25,7 @@ require.config
         text: 'vendor/require-text'
 
         # Templates
-        templates: '/templates'
+        templates: '../templates'
 
         # Moment js, for date/time formatting
         moment: 'vendor/moment'
