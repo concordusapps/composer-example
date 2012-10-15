@@ -6,10 +6,10 @@ For all details and documentation:
 http://github.com/chaplinjs/chaplin
 */
 
-var __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
-  __hasProp = {}.hasOwnProperty,
+var __hasProp = {}.hasOwnProperty,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
   __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
+  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
   __slice = [].slice;
 
 define('chaplin/application', ['backbone', 'chaplin/mediator', 'chaplin/dispatcher', 'chaplin/views/layout', 'chaplin/lib/router', 'chaplin/composer'], function(Backbone, mediator, Dispatcher, Layout, Router, Composer) {
@@ -147,20 +147,17 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       return this.subscribeEvent('!startupController', this.startupController);
     };
 
-    Dispatcher.prototype.matchRoute = function(route, params, options) {
-      return this.startupController(route.controller, route.action, params, options);
+    Dispatcher.prototype.matchRoute = function(route, params) {
+      return this.startupController(route.controller, route.action, params);
     };
 
-    Dispatcher.prototype.startupController = function(controllerName, action, params, options) {
+    Dispatcher.prototype.startupController = function(controllerName, action, params) {
       var handler, isSameController;
       if (action == null) {
         action = 'index';
       }
       if (params == null) {
         params = {};
-      }
-      if (options == null) {
-        options = {};
       }
       if (params.changeURL !== false) {
         params.changeURL = true;
@@ -172,7 +169,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       if (isSameController) {
         return;
       }
-      handler = _(this.controllerLoaded).bind(this, controllerName, action, params, options);
+      handler = _(this.controllerLoaded).bind(this, controllerName, action, params);
       return this.loadController(controllerName, handler);
     };
 
@@ -187,7 +184,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       }
     };
 
-    Dispatcher.prototype.controllerLoaded = function(controllerName, action, params, options, ControllerConstructor) {
+    Dispatcher.prototype.controllerLoaded = function(controllerName, action, params, ControllerConstructor) {
       var controller, currentController, currentControllerName;
       currentControllerName = this.currentControllerName || null;
       currentController = this.currentController || null;
@@ -205,7 +202,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       this.currentController = controller;
       this.currentAction = action;
       this.currentParams = params;
-      this.adjustURL(controller, _(params).extend(options));
+      this.adjustURL(controller, params);
       return this.publishEvent('startupController', {
         previousControllerName: this.previousControllerName,
         controller: this.currentController,
@@ -226,7 +223,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
         throw new Error('Dispatcher#adjustURL: controller for ' + ("" + this.currentControllerName + " does not provide a historyURL"));
       }
       if (params.changeURL) {
-        this.publishEvent('!router:changeURL', url, params);
+        this.publishEvent('!router:changeURL', url);
       }
       return this.url = url;
     };
@@ -257,12 +254,9 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
 
     _(Composer.prototype).extend(EventBroker);
 
-    Composer.prototype.regions = null;
-
     Composer.prototype.compositions = null;
 
     function Composer() {
-      this.registerRegion = __bind(this.registerRegion, this);
       this.initialize.apply(this, arguments);
     }
 
@@ -270,9 +264,7 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
       if (options == null) {
         options = {};
       }
-      this.regions = [];
       this.compositions = [];
-      this.subscribeEvent('!region:apply', this.applyRegion);
       this.subscribeEvent('!composer:compose', this.compose);
       return this.subscribeEvent('startupController', this.onStartupController);
     };
@@ -288,30 +280,28 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
       if (_.isUndefined(check)) {
         composition = {
           type: type,
-          options: _.clone(options),
-          active: true
+          options: _.clone(options)
         };
-        options.autoRender = false;
         composition.instance = new type(options);
-        this.registerRegions(composition.instance);
-        composition.instance.render();
+        if (!composition.instance.autoRender) {
+          composition.instance.render();
+        }
         return this.compositions.push(composition);
       } else {
-        check.active = true;
-        return this.registerRegions(check.instance);
+        return check.instance.stale = false;
       }
     };
 
     Composer.prototype.onStartupController = function(options) {
       var composition, index;
-      this.compositions = (function() {
+      return this.compositions = (function() {
         var _i, _len, _ref, _results;
         _ref = this.compositions;
         _results = [];
         for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
           composition = _ref[index];
-          if (composition.active) {
-            composition.active = false;
+          if (!composition.instance.stale) {
+            composition.instance.stale = true;
             _results.push(composition);
           } else {
             composition.instance.dispose();
@@ -320,29 +310,6 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
         }
         return _results;
       }).call(this);
-      return this.regions = this.regions.slice(0);
-    };
-
-    Composer.prototype.registerRegions = function(instance) {
-      if (instance.regions != null) {
-        return instance.regions(_.partial(this.registerRegion, instance));
-      }
-    };
-
-    Composer.prototype.registerRegion = function(context, name, options) {
-      return this.regions.push({
-        name: name,
-        cid: context.cid,
-        selector: options.selector
-      });
-    };
-
-    Composer.prototype.applyRegion = function(name, view) {
-      var region;
-      region = _.find(this.regions, function(region) {
-        return region.name === name;
-      });
-      return view.container = region.selector;
     };
 
     Composer.prototype.dispose = function() {
@@ -355,10 +322,8 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
         composition = _ref[_i];
         composition.instance.dispose();
       }
-      this.regions = this.regions.slice(0);
       this.compositions = this.compositions.slice(0);
       delete this.compositions;
-      delete this.regions;
       this.disposed = true;
       return typeof Object.freeze === "function" ? Object.freeze(this) : void 0;
     };
@@ -658,7 +623,11 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
 
     Layout.prototype.cid = 'chaplin-layout';
 
+    Layout.prototype.regions = null;
+
     function Layout() {
+      this.registerRegion = __bind(this.registerRegion, this);
+
       this.openLink = __bind(this.openLink, this);
       this.initialize.apply(this, arguments);
     }
@@ -675,9 +644,13 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
         skipRouting: '.noscript',
         scrollTo: [0, 0]
       });
+      this.regions = [];
       this.subscribeEvent('beforeControllerDispose', this.hideOldView);
       this.subscribeEvent('startupController', this.showNewView);
       this.subscribeEvent('startupController', this.adjustTitle);
+      this.subscribeEvent('!region:apply', this.applyRegion);
+      this.subscribeEvent('!region:register', this.registerRegions);
+      this.subscribeEvent('view:dispose:before', this.unregisterRegions);
       if (this.settings.routeLinks) {
         this.startLinkRouting();
       }
@@ -782,6 +755,37 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
       });
     };
 
+    Layout.prototype.registerRegion = function(instance, name, selector) {
+      return this.regions.push({
+        name: name,
+        cid: instance.cid,
+        selector: selector
+      });
+    };
+
+    Layout.prototype.registerRegions = function(instance) {
+      if (instance.regions != null) {
+        return instance.regions(_.partial(this.registerRegion, instance));
+      }
+    };
+
+    Layout.prototype.unregisterRegions = function(instance) {
+      return this.regions = _(this.regions).reject(function(region) {
+        return region.cid === instance.cid;
+      });
+    };
+
+    Layout.prototype.applyRegion = function(name, instance) {
+      var region;
+      region = _.find(this.regions, function(region) {
+        return region.name === name;
+      });
+      if (_.isUndefined(region)) {
+        throw new Error("No region registed under " + name);
+      }
+      return instance.container = region.selector;
+    };
+
     Layout.prototype.disposed = false;
 
     Layout.prototype.dispose = function() {
@@ -820,6 +824,8 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
     View.prototype.subviews = null;
 
     View.prototype.subviewsByName = null;
+
+    View.prototype.stale = false;
 
     View.prototype.wrapMethod = function(name) {
       var func, instance;
@@ -867,6 +873,7 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
       if ((options != null ? options.region : void 0) != null) {
         this.publishEvent('!region:apply', options.region, this);
       }
+      this.publishEvent('!region:register', this);
       if (!this.initializeIsWrapped) {
         return this.afterInitialize();
       }
@@ -1066,6 +1073,7 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
       if (this.disposed) {
         return;
       }
+      this.publishEvent('view:dispose:before', this);
       _ref = this.subviews;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         subview = _ref[_i];
@@ -1503,7 +1511,7 @@ define('chaplin/lib/route', ['underscore', 'backbone', 'chaplin/lib/event_broker
     Route.prototype.handler = function(path, options) {
       var params;
       params = this.buildParams(path, options);
-      return this.publishEvent('matchRoute', this, params, options);
+      return this.publishEvent('matchRoute', this, params);
     };
 
     Route.prototype.buildParams = function(path, options) {
@@ -1623,50 +1631,36 @@ define('chaplin/lib/router', ['underscore', 'backbone', 'chaplin/mediator', 'cha
       return route;
     };
 
-    Router.prototype.route = function(path, options) {
+    Router.prototype.route = function(path) {
       var handler, _i, _len, _ref;
-      if (options == null) {
-        options = {};
-      }
-      _(options).defaults({
-        changeURL: true
-      });
       path = path.replace(/^(\/#|\/)/, '');
       _ref = Backbone.history.handlers;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         handler = _ref[_i];
         if (handler.route.test(path)) {
-          handler.callback(path, options);
+          handler.callback(path, {
+            changeURL: true
+          });
           return true;
         }
       }
       return false;
     };
 
-    Router.prototype.routeHandler = function(path, options, callback) {
-      var routed, _ref;
-      if (arguments.length === 2) {
-        _ref = [options, {}], callback = _ref[0], options = _ref[1];
-      }
-      routed = this.route(path, options);
+    Router.prototype.routeHandler = function(path, callback) {
+      var routed;
+      routed = this.route(path);
       return typeof callback === "function" ? callback(routed) : void 0;
     };
 
-    Router.prototype.changeURL = function(url, options) {
-      if (options == null) {
-        options = {};
-      }
-      _(options).defaults({
+    Router.prototype.changeURL = function(url) {
+      return Backbone.history.navigate(url, {
         trigger: false
       });
-      return Backbone.history.navigate(url, options);
     };
 
-    Router.prototype.changeURLHandler = function(url, options) {
-      if (options == null) {
-        options = {};
-      }
-      return this.changeURL(url, options);
+    Router.prototype.changeURLHandler = function(url) {
+      return this.changeURL(url);
     };
 
     Router.prototype.disposed = false;

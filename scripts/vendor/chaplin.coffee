@@ -184,8 +184,8 @@ define 'chaplin/dispatcher', [
     # ----------------------------------
 
     # Handler for the global matchRoute event
-    matchRoute: (route, params, options) ->
-      @startupController route.controller, route.action, params, options
+    matchRoute: (route, params) ->
+      @startupController route.controller, route.action, params
 
     # Handler for the global !startupController event
     #
@@ -197,8 +197,7 @@ define 'chaplin/dispatcher', [
     #   3. Instantiate the new controller, call the controller action
     #   4. Show the new view
     #
-    startupController: (controllerName, action = 'index', params = {},
-                        options = {}) ->
+    startupController: (controllerName, action = 'index', params = {}) ->
       # Set default flags
 
       # Whether to update the URL after controller startup
@@ -224,9 +223,7 @@ define 'chaplin/dispatcher', [
       return if isSameController
 
       # Fetch the new controller, then go on
-      handler = _(@controllerLoaded).bind(
-        this, controllerName, action, params, options)
-
+      handler = _(@controllerLoaded).bind(this, controllerName, action, params)
       @loadController controllerName, handler
 
     # Load the constructor for a given controller name.
@@ -241,8 +238,7 @@ define 'chaplin/dispatcher', [
         handler require path
 
     # Handler for the controller lazy-loading
-    controllerLoaded: (controllerName, action, params, options,
-                       ControllerConstructor) ->
+    controllerLoaded: (controllerName, action, params, ControllerConstructor) ->
 
       # Shortcuts for the old controller
       currentControllerName = @currentControllerName or null
@@ -273,8 +269,7 @@ define 'chaplin/dispatcher', [
       @currentAction = action
       @currentParams = params
 
-      # Adjust the URL; pass in both params and options
-      @adjustURL controller, _(params).extend options
+      @adjustURL controller, params
 
       # We're done! Spread the word!
       @publishEvent 'startupController',
@@ -303,8 +298,7 @@ define 'chaplin/dispatcher', [
           "#{@currentControllerName} does not provide a historyURL"
 
       # Tell the router to actually change the current URL
-      # Take parameter hash from and forward it on as well
-      @publishEvent '!router:changeURL', url, params if params.changeURL
+      @publishEvent '!router:changeURL', url if params.changeURL
 
       # Save the URL
       @url = url
@@ -363,9 +357,6 @@ define 'chaplin/composer', [
     # Mixin an EventBroker
     _(@prototype).extend EventBroker
 
-    # The collection of registered regions
-    regions: null
-
     # The collection of composed compositions
     compositions: null
 
@@ -374,11 +365,10 @@ define 'chaplin/composer', [
 
     initialize: (options = {}) ->
       # initialize collections
-      @regions = []
       @compositions = []
 
       # subscribe to events
-      @subscribeEvent '!region:apply', @applyRegion
+      #@subscribeEvent '!region:apply', @applyRegion
       @subscribeEvent '!composer:compose', @compose
       @subscribeEvent 'startupController', @onStartupController
 
@@ -394,62 +384,33 @@ define 'chaplin/composer', [
         composition =
           type: type
           options: _.clone options
-          active: true
-
-        # Ensure composition is not set to autoRender as we need
-        # to register the regions before it is rendered
-        options.autoRender = false
 
         # Instantiate the composition
         composition.instance = new type options
 
-        # Register the exposed regions
-        @registerRegions composition.instance
-
         # Render the composition
-        composition.instance.render()
+        composition.instance.render() unless composition.instance.autoRender
 
         # Append to the list so we can dispose and track the
         # composition
         @compositions.push composition
 
       else
-        # Declare composition as actively in use so that it does not
-        # get diposed
-        check.active = true
-
-        # Re-register the exposed regions
-        @registerRegions check.instance
+        # Declare composition as not stale so that its regions will now be
+        # counted
+        check.instance.stale = false
 
     onStartupController: (options) ->
       # Action method is done; perform post-action clean up
       # Dispose and delete all unactive compositions
       # Declare all active compositions as de-activated
       @compositions = for composition, index in @compositions
-        if composition.active
-          composition.active = false
+        unless composition.instance.stale
+          composition.instance.stale = true
           composition
         else
           composition.instance.dispose()
           continue
-
-      # Unregister all regions
-      @regions = @regions[..]
-
-    registerRegions: (instance) ->
-      # Registers all regions of the passed view instance
-      instance.regions _.partial @registerRegion, instance if instance.regions?
-
-    registerRegion: (context, name, options) =>
-      # Register a single region; called from the view instance
-      @regions.push {name, cid: context.cid, selector: options.selector}
-
-    applyRegion: (name, view) ->
-      # Find an appropriate region
-      region = _.find @regions, (region) -> region.name is name
-
-      # Apply the region selector
-      view.container = region.selector
 
     dispose: ->
       return if @disposed
@@ -458,12 +419,10 @@ define 'chaplin/composer', [
       composition.instance.dispose() for composition in @compositions
 
       # Destroy collections
-      @regions = @regions[..]
       @compositions = @compositions[..]
 
       # Remove properties
       delete @compositions
-      delete @regions
 
       # Finished
       @disposed = true
@@ -804,6 +763,9 @@ define 'chaplin/views/layout', [
     $el: $(document)
     cid: 'chaplin-layout'
 
+    # Region collection; used to assign canonocial names to selectors
+    regions: null
+
     constructor: ->
       @initialize arguments...
 
@@ -817,9 +779,15 @@ define 'chaplin/views/layout', [
         # Per default, jump to the top of the page
         scrollTo: [0, 0]
 
+      @regions = []
+
       @subscribeEvent 'beforeControllerDispose', @hideOldView
       @subscribeEvent 'startupController', @showNewView
       @subscribeEvent 'startupController', @adjustTitle
+
+      @subscribeEvent '!region:apply', @applyRegion
+      @subscribeEvent '!region:register', @registerRegions
+      @subscribeEvent 'view:dispose:before', @unregisterRegions
 
       # Set the app link routing
       if @settings.routeLinks
@@ -939,6 +907,39 @@ define 'chaplin/views/layout', [
 
       return
 
+    # Region management
+    # -----------------
+
+    # Registering one region; namespaced by cid
+    registerRegion: (instance, name, selector) =>
+      @regions.push
+        name: name
+        cid: instance.cid
+        selector: selector
+
+    # Triggered by view; passed in the region registration method
+    # Simply register all regions exposed by it
+    registerRegions: (instance) ->
+      if instance.regions?
+        instance.regions _.partial @registerRegion, instance
+
+    # When views are disposed; remove all their registered regions
+    unregisterRegions: (instance) ->
+      @regions = _(@regions).reject (region) -> region.cid is instance.cid
+
+    # When views are instantiated and request for a region assignment;
+    # attempt to fulfil it.
+    applyRegion: (name, instance) ->
+      # Find an appropriate region
+      region = _.find @regions, (region) -> region.name is name
+
+      # Assert that we got a valid region
+      if _.isUndefined region
+        throw new Error "No region registed under #{name}"
+
+      # Apply the region selector
+      instance.container = region.selector
+
     # Disposal
     # --------
 
@@ -1002,6 +1003,13 @@ define 'chaplin/views/view', [
     subviews: null
     subviewsByName: null
 
+    # State
+    # -----
+
+    # A view is `stale` when it has been previously composed by the last
+    # route but has not yet been composed by the current route.
+    stale: false
+
     # Method wrapping to enable `afterRender` and `afterInitialize`
     # -------------------------------------------------------------
 
@@ -1059,11 +1067,12 @@ define 'chaplin/views/view', [
       if @model or @collection
         @modelBind 'dispose', @dispose
 
-      #!!
       # Attempt to apply a named region
       if options?.region?
         @publishEvent '!region:apply', options.region, @
-      #!!
+
+      # Register all exposed regions
+      @publishEvent '!region:register', @
 
       # Call `afterInitialize` if `initialize` was not wrapped
       unless @initializeIsWrapped
@@ -1327,6 +1336,9 @@ define 'chaplin/views/view', [
 
     dispose: ->
       return if @disposed
+
+      # Let everyone know we're being disposed
+      @publishEvent 'view:dispose:before', this
 
       # Dispose subviews
       subview.dispose() for subview in @subviews
@@ -1871,8 +1883,7 @@ define 'chaplin/lib/route', [
       params = @buildParams path, options
 
       # Publish a global matchRoute event passing the route and the params
-      # Original options hash forwarded to allow further forwarding to backbone
-      @publishEvent 'matchRoute', this, params, options
+      @publishEvent 'matchRoute', this, params
 
     # Create a proper Rails-like params hash, not an array like Backbone
     # `matches` and `additionalParams` arguments are optional
@@ -2005,44 +2016,29 @@ define 'chaplin/lib/router', [
     # This looks quite like Backbone.History::loadUrl but it
     # accepts an absolute URL with a leading slash (e.g. /foo)
     # and passes a changeURL param to the callback function.
-    route: (path, options = {}) =>
-      # Default options to changeURL: true to mimic existing behavior while
-      # allowing additional options to be forwarded on
-      _(options).defaults
-        changeURL: true
-
+    route: (path) =>
       # Remove leading hash or slash
       path = path.replace /^(\/#|\/)/, ''
       for handler in Backbone.history.handlers
         if handler.route.test(path)
-          handler.callback path, options
+          handler.callback path, changeURL: true
           return true
       false
 
     # Handler for the global !router:route event
-    routeHandler: (path, options, callback) ->
-      # Assume only path and callback were passed if we only got 2 arguments;
-      # so as to mimic existing chaplin behavior
-      [callback, options] = [options, {}] if arguments.length is 2
-
-      # Continue on to handle the route; pass in options hash
-      routed = @route path, options
+    routeHandler: (path, callback) ->
+      routed = @route path
       callback? routed
 
     # Change the current URL, add a history entry.
-    changeURL: (url, options = {}) ->
-      # Default options to trigger: false (which is Backbone’s
-      # default behavior, but added for clarity)
-      _(options).defaults
-        trigger: false
-
-      # Navigate to the passed URL and forward options to backbone
-      Backbone.history.navigate url, options
+    # Do not trigger any routes (which is Backbone’s
+    # default behavior, but added for clarity)
+    changeURL: (url) ->
+      Backbone.history.navigate url, trigger: false
 
     # Handler for the global !router:changeURL event
-    # Accepts both the url and an options hash that is forwarded to backbone
-    changeURLHandler: (url, options = {}) ->
-      @changeURL url, options
+    changeURLHandler: (url) ->
+      @changeURL url
 
     # Disposal
     # --------

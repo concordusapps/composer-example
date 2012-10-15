@@ -22,15 +22,9 @@ define(function(require) {
     Site.prototype.template = template;
 
     Site.prototype.regions = function(region) {
-      region('header', {
-        selector: 'header'
-      });
-      region('footer', {
-        selector: 'footer'
-      });
-      return region('body', {
-        selector: '#body'
-      });
+      region('header', 'header');
+      region('footer', 'footer');
+      return region('body', '#body');
     };
 
     Site.prototype.afterRender = function() {
