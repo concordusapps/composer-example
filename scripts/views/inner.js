@@ -22,8 +22,8 @@ define(function(require) {
     Site.prototype.template = template;
 
     Site.prototype.regions = function(region) {
-      return region('#content', {
-        name: 'content'
+      return region('content', {
+        selector: '#content'
       });
     };
 

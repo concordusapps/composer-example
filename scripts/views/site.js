@@ -23,13 +23,13 @@ define(function(require) {
 
     Site.prototype.regions = function(region) {
       region('header', {
-        name: 'header'
+        selector: 'header'
       });
       region('footer', {
-        name: 'footer'
+        selector: 'footer'
       });
-      return region('#body', {
-        name: 'body'
+      return region('body', {
+        selector: '#body'
       });
     };
 

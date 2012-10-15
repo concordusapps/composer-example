@@ -27,15 +27,13 @@ define 'chaplin/application', [
     # The site title used in the document title
     title: ''
 
-    # The application instantiates these three core modules
+    # The application instantiates these four core modules
     dispatcher: null
     layout: null
     router: null
+    composer: null
 
     initialize: ->
-
-    initComposer: (options = {}) ->
-      @composer = new Composer options
 
     initDispatcher: (options) ->
       @dispatcher = new Dispatcher options
@@ -43,6 +41,9 @@ define 'chaplin/application', [
     initLayout: (options = {}) ->
       options.title ?= @title
       @layout = new Layout options
+
+    initComposer: (options = {}) ->
+      @composer = new Composer options
 
     # Instantiate the dispatcher
     # --------------------------
@@ -67,7 +68,7 @@ define 'chaplin/application', [
     dispose: ->
       return if @disposed
 
-      properties = ['dispatcher', 'layout', 'router']
+      properties = ['dispatcher', 'layout', 'router', 'composer']
       for prop in properties when this[prop]?
         this[prop].dispose()
         delete this[prop]
@@ -183,8 +184,8 @@ define 'chaplin/dispatcher', [
     # ----------------------------------
 
     # Handler for the global matchRoute event
-    matchRoute: (route, params, options) ->
-      @startupController route.controller, route.action, params, options
+    matchRoute: (route, params) ->
+      @startupController route.controller, route.action, params
 
     # Handler for the global !startupController event
     #
@@ -196,8 +197,7 @@ define 'chaplin/dispatcher', [
     #   3. Instantiate the new controller, call the controller action
     #   4. Show the new view
     #
-    startupController: (controllerName, action = 'index', params = {},
-                        options = {}) ->
+    startupController: (controllerName, action = 'index', params = {}) ->
       # Set default flags
 
       # Whether to update the URL after controller startup
@@ -223,9 +223,7 @@ define 'chaplin/dispatcher', [
       return if isSameController
 
       # Fetch the new controller, then go on
-      handler = _(@controllerLoaded).bind(
-        this, controllerName, action, params, options)
-
+      handler = _(@controllerLoaded).bind(this, controllerName, action, params)
       @loadController controllerName, handler
 
     # Load the constructor for a given controller name.
@@ -240,8 +238,7 @@ define 'chaplin/dispatcher', [
         handler require path
 
     # Handler for the controller lazy-loading
-    controllerLoaded: (controllerName, action, params, options,
-                       ControllerConstructor) ->
+    controllerLoaded: (controllerName, action, params, ControllerConstructor) ->
 
       # Shortcuts for the old controller
       currentControllerName = @currentControllerName or null
@@ -272,8 +269,7 @@ define 'chaplin/dispatcher', [
       @currentAction = action
       @currentParams = params
 
-      # Adjust the URL; pass in both params and options
-      @adjustURL controller, _(params).extend options
+      @adjustURL controller, params
 
       # We're done! Spread the word!
       @publishEvent 'startupController',
@@ -302,8 +298,7 @@ define 'chaplin/dispatcher', [
           "#{@currentControllerName} does not provide a historyURL"
 
       # Tell the router to actually change the current URL
-      # Take parameter hash from and forward it on as well
-      @publishEvent '!router:changeURL', url, params if params.changeURL
+      @publishEvent '!router:changeURL', url if params.changeURL
 
       # Save the URL
       @url = url
@@ -330,6 +325,29 @@ define 'chaplin/composer', [
   'chaplin/lib/event_broker'
 ], (_, Backbone, utils, EventBroker) ->
   'use strict'
+
+  # Composer
+  # --------
+
+  # The sole job of the composer is to allow views to be 'composed'.
+  # To compose a view:A
+  #   @publishEvent '!composer:compose', View, options
+  #
+  # If the view has already been composed by a previous action then nothing
+  # apart from registering the view as in use happens. Else, the view
+  # is instantiated and passed the options that were passed in. If an action
+  # is routed to where a view that was composed is not re-composed, the
+  # composed view is disposed.
+  #
+  # Views that are composed are additionaly allowed to register regions.
+  # Regions are named containers and are registered as follows (from the
+  # view class that is being composed):
+  #   regions: (region) ->
+  #     region 'name', selector: '#id'
+  #     region 'name', selector: '.class#id'
+  #
+  # All views are allowed to be placed inside a region (composed ones included)
+  #  new View region: 'name'
 
   class Composer
 
@@ -413,10 +431,12 @@ define 'chaplin/composer', [
       @regions = @regions[..]
 
     registerRegions: (instance) ->
+      # Registers all regions of the passed view instance
       instance.regions _.partial @registerRegion, instance if instance.regions?
 
-    registerRegion: (context, selector, options) =>
-      @regions.push {selector, cid: context.cid, name: options.name}
+    registerRegion: (context, name, options) =>
+      # Register a single region; called from the view instance
+      @regions.push {name, cid: context.cid, selector: options.selector}
 
     applyRegion: (name, view) ->
       # Find an appropriate region
@@ -424,9 +444,6 @@ define 'chaplin/composer', [
 
       # Apply the region selector
       view.container = region.selector
-
-      # Don't return the for loop
-      undefined
 
     dispose: ->
       return if @disposed
@@ -1848,8 +1865,7 @@ define 'chaplin/lib/route', [
       params = @buildParams path, options
 
       # Publish a global matchRoute event passing the route and the params
-      # Original options hash forwarded to allow further forwarding to backbone
-      @publishEvent 'matchRoute', this, params, options
+      @publishEvent 'matchRoute', this, params
 
     # Create a proper Rails-like params hash, not an array like Backbone
     # `matches` and `additionalParams` arguments are optional
@@ -1982,44 +1998,29 @@ define 'chaplin/lib/router', [
     # This looks quite like Backbone.History::loadUrl but it
     # accepts an absolute URL with a leading slash (e.g. /foo)
     # and passes a changeURL param to the callback function.
-    route: (path, options = {}) =>
-      # Default options to changeURL: true to mimic existing behavior while
-      # allowing additional options to be forwarded on
-      _(options).defaults
-        changeURL: true
-
+    route: (path) =>
       # Remove leading hash or slash
       path = path.replace /^(\/#|\/)/, ''
       for handler in Backbone.history.handlers
         if handler.route.test(path)
-          handler.callback path, options
+          handler.callback path, changeURL: true
           return true
       false
 
     # Handler for the global !router:route event
-    routeHandler: (path, options, callback) ->
-      # Assume only path and callback were passed if we only got 2 arguments;
-      # so as to mimic existing chaplin behavior
-      [callback, options] = [options, {}] if arguments.length is 2
-
-      # Continue on to handle the route; pass in options hash
-      routed = @route path, options
+    routeHandler: (path, callback) ->
+      routed = @route path
       callback? routed
 
     # Change the current URL, add a history entry.
-    changeURL: (url, options = {}) ->
-      # Default options to trigger: false (which is Backbone’s
-      # default behavior, but added for clarity)
-      _(options).defaults
-        trigger: false
-
-      # Navigate to the passed URL and forward options to backbone
-      Backbone.history.navigate url, options
+    # Do not trigger any routes (which is Backbone’s
+    # default behavior, but added for clarity)
+    changeURL: (url) ->
+      Backbone.history.navigate url, trigger: false
 
     # Handler for the global !router:changeURL event
-    # Accepts both the url and an options hash that is forwarded to backbone
-    changeURLHandler: (url, options = {}) ->
-      @changeURL url, options
+    changeURLHandler: (url) ->
+      @changeURL url
 
     # Disposal
     # --------

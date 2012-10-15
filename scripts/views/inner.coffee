@@ -18,7 +18,7 @@ define (require) ->
         template: template
 
         regions: (region) ->
-            region '#content',  name: 'content'
+            region 'content',  selector: '#content'
 
         # afterRender: ->
         #     super

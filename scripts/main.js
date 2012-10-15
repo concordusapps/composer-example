@@ -1,6 +1,6 @@
 
 require.config({
-  baseUrl: 'scripts/',
+  baseUrl: '/composer-example/scripts/',
   paths: {
     underscore: 'vendor/lodash',
     jquery: 'vendor/jquery',
