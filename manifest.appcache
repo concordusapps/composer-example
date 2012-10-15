@@ -1,6 +1,12 @@
+Error: Script error
+http://requirejs.org/docs/errors.html#scripterror
+
+  http://localhost:3501/scripts/amd-app.js:1
+  http://localhost:3501/scripts/amd-app.js:1 in w
+  http://localhost:3501/scripts/amd-app.js:1
 CACHE MANIFEST
 
-# Time: Sun Oct 14 2012 18:02:03 GMT-0700 (PDT)
+# Time: Sun Oct 14 2012 18:05:22 GMT-0700 (PDT)
 # This manifest was created by confess.js, http://github.com/jamesgpearce/confess
 #
 # Retrieved URL: http://localhost:3501/

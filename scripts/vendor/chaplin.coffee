@@ -184,8 +184,8 @@ define 'chaplin/dispatcher', [
     # ----------------------------------
 
     # Handler for the global matchRoute event
-    matchRoute: (route, params) ->
-      @startupController route.controller, route.action, params
+    matchRoute: (route, params, options) ->
+      @startupController route.controller, route.action, params, options
 
     # Handler for the global !startupController event
     #
@@ -197,7 +197,8 @@ define 'chaplin/dispatcher', [
     #   3. Instantiate the new controller, call the controller action
     #   4. Show the new view
     #
-    startupController: (controllerName, action = 'index', params = {}) ->
+    startupController: (controllerName, action = 'index', params = {},
+                        options = {}) ->
       # Set default flags
 
       # Whether to update the URL after controller startup
@@ -223,7 +224,9 @@ define 'chaplin/dispatcher', [
       return if isSameController
 
       # Fetch the new controller, then go on
-      handler = _(@controllerLoaded).bind(this, controllerName, action, params)
+      handler = _(@controllerLoaded).bind(
+        this, controllerName, action, params, options)
+
       @loadController controllerName, handler
 
     # Load the constructor for a given controller name.
@@ -238,7 +241,8 @@ define 'chaplin/dispatcher', [
         handler require path
 
     # Handler for the controller lazy-loading
-    controllerLoaded: (controllerName, action, params, ControllerConstructor) ->
+    controllerLoaded: (controllerName, action, params, options,
+                       ControllerConstructor) ->
 
       # Shortcuts for the old controller
       currentControllerName = @currentControllerName or null
@@ -269,7 +273,8 @@ define 'chaplin/dispatcher', [
       @currentAction = action
       @currentParams = params
 
-      @adjustURL controller, params
+      # Adjust the URL; pass in both params and options
+      @adjustURL controller, _(params).extend options
 
       # We're done! Spread the word!
       @publishEvent 'startupController',
@@ -298,7 +303,8 @@ define 'chaplin/dispatcher', [
           "#{@currentControllerName} does not provide a historyURL"
 
       # Tell the router to actually change the current URL
-      @publishEvent '!router:changeURL', url if params.changeURL
+      # Take parameter hash from and forward it on as well
+      @publishEvent '!router:changeURL', url, params if params.changeURL
 
       # Save the URL
       @url = url
@@ -330,7 +336,7 @@ define 'chaplin/composer', [
   # --------
 
   # The sole job of the composer is to allow views to be 'composed'.
-  # To compose a view:A
+  # To compose a view:
   #   @publishEvent '!composer:compose', View, options
   #
   # If the view has already been composed by a previous action then nothing
@@ -1865,7 +1871,8 @@ define 'chaplin/lib/route', [
       params = @buildParams path, options
 
       # Publish a global matchRoute event passing the route and the params
-      @publishEvent 'matchRoute', this, params
+      # Original options hash forwarded to allow further forwarding to backbone
+      @publishEvent 'matchRoute', this, params, options
 
     # Create a proper Rails-like params hash, not an array like Backbone
     # `matches` and `additionalParams` arguments are optional
@@ -1998,29 +2005,44 @@ define 'chaplin/lib/router', [
     # This looks quite like Backbone.History::loadUrl but it
     # accepts an absolute URL with a leading slash (e.g. /foo)
     # and passes a changeURL param to the callback function.
-    route: (path) =>
+    route: (path, options = {}) =>
+      # Default options to changeURL: true to mimic existing behavior while
+      # allowing additional options to be forwarded on
+      _(options).defaults
+        changeURL: true
+
       # Remove leading hash or slash
       path = path.replace /^(\/#|\/)/, ''
       for handler in Backbone.history.handlers
         if handler.route.test(path)
-          handler.callback path, changeURL: true
+          handler.callback path, options
           return true
       false
 
     # Handler for the global !router:route event
-    routeHandler: (path, callback) ->
-      routed = @route path
+    routeHandler: (path, options, callback) ->
+      # Assume only path and callback were passed if we only got 2 arguments;
+      # so as to mimic existing chaplin behavior
+      [callback, options] = [options, {}] if arguments.length is 2
+
+      # Continue on to handle the route; pass in options hash
+      routed = @route path, options
       callback? routed
 
     # Change the current URL, add a history entry.
-    # Do not trigger any routes (which is Backbone’s
-    # default behavior, but added for clarity)
-    changeURL: (url) ->
-      Backbone.history.navigate url, trigger: false
+    changeURL: (url, options = {}) ->
+      # Default options to trigger: false (which is Backbone’s
+      # default behavior, but added for clarity)
+      _(options).defaults
+        trigger: false
+
+      # Navigate to the passed URL and forward options to backbone
+      Backbone.history.navigate url, options
 
     # Handler for the global !router:changeURL event
-    changeURLHandler: (url) ->
-      @changeURL url
+    # Accepts both the url and an options hash that is forwarded to backbone
+    changeURLHandler: (url, options = {}) ->
+      @changeURL url, options
 
     # Disposal
     # --------
