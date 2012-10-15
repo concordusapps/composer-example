@@ -18,9 +18,9 @@ define (require) ->
         template: template
 
         regions: (region) ->
-            region 'header', name: 'header'
-            region 'footer', name: 'footer'
-            region '#body',  name: 'body'
+            region 'header', selector: 'header'
+            region 'footer', selector: 'footer'
+            region 'body',  selector: '#body'
 
         afterRender: ->
             super
