@@ -2,7 +2,7 @@
 #!
 
 require.config
-    baseUrl: '/composer-example/scripts/'
+    baseUrl: 'scripts/'
 
     paths:
         # Collection of (extremely) useful utilities.

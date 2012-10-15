@@ -330,7 +330,7 @@ define 'chaplin/composer', [
   # --------
 
   # The sole job of the composer is to allow views to be 'composed'.
-  # To compose a view:A
+  # To compose a view:
   #   @publishEvent '!composer:compose', View, options
   #
   # If the view has already been composed by a previous action then nothing
@@ -357,9 +357,6 @@ define 'chaplin/composer', [
     # Mixin an EventBroker
     _(@prototype).extend EventBroker
 
-    # The collection of registered regions
-    regions: null
-
     # The collection of composed compositions
     compositions: null
 
@@ -368,11 +365,10 @@ define 'chaplin/composer', [
 
     initialize: (options = {}) ->
       # initialize collections
-      @regions = []
       @compositions = []
 
       # subscribe to events
-      @subscribeEvent '!region:apply', @applyRegion
+      #@subscribeEvent '!region:apply', @applyRegion
       @subscribeEvent '!composer:compose', @compose
       @subscribeEvent 'startupController', @onStartupController
 
@@ -388,62 +384,33 @@ define 'chaplin/composer', [
         composition =
           type: type
           options: _.clone options
-          active: true
-
-        # Ensure composition is not set to autoRender as we need
-        # to register the regions before it is rendered
-        options.autoRender = false
 
         # Instantiate the composition
         composition.instance = new type options
 
-        # Register the exposed regions
-        @registerRegions composition.instance
-
         # Render the composition
-        composition.instance.render()
+        composition.instance.render() unless composition.instance.autoRender
 
         # Append to the list so we can dispose and track the
         # composition
         @compositions.push composition
 
       else
-        # Declare composition as actively in use so that it does not
-        # get diposed
-        check.active = true
-
-        # Re-register the exposed regions
-        @registerRegions check.instance
+        # Declare composition as not stale so that its regions will now be
+        # counted
+        check.instance.stale = false
 
     onStartupController: (options) ->
       # Action method is done; perform post-action clean up
       # Dispose and delete all unactive compositions
       # Declare all active compositions as de-activated
       @compositions = for composition, index in @compositions
-        if composition.active
-          composition.active = false
+        unless composition.instance.stale
+          composition.instance.stale = true
           composition
         else
           composition.instance.dispose()
           continue
-
-      # Unregister all regions
-      @regions = @regions[..]
-
-    registerRegions: (instance) ->
-      # Registers all regions of the passed view instance
-      instance.regions _.partial @registerRegion, instance if instance.regions?
-
-    registerRegion: (context, name, options) =>
-      # Register a single region; called from the view instance
-      @regions.push {name, cid: context.cid, selector: options.selector}
-
-    applyRegion: (name, view) ->
-      # Find an appropriate region
-      region = _.find @regions, (region) -> region.name is name
-
-      # Apply the region selector
-      view.container = region.selector
 
     dispose: ->
       return if @disposed
@@ -452,12 +419,10 @@ define 'chaplin/composer', [
       composition.instance.dispose() for composition in @compositions
 
       # Destroy collections
-      @regions = @regions[..]
       @compositions = @compositions[..]
 
       # Remove properties
       delete @compositions
-      delete @regions
 
       # Finished
       @disposed = true
@@ -798,6 +763,9 @@ define 'chaplin/views/layout', [
     $el: $(document)
     cid: 'chaplin-layout'
 
+    # Region collection; used to assign canonocial names to selectors
+    regions: null
+
     constructor: ->
       @initialize arguments...
 
@@ -811,9 +779,15 @@ define 'chaplin/views/layout', [
         # Per default, jump to the top of the page
         scrollTo: [0, 0]
 
+      @regions = []
+
       @subscribeEvent 'beforeControllerDispose', @hideOldView
       @subscribeEvent 'startupController', @showNewView
       @subscribeEvent 'startupController', @adjustTitle
+
+      @subscribeEvent '!region:apply', @applyRegion
+      @subscribeEvent '!region:register', @registerRegions
+      @subscribeEvent 'view:dispose:before', @unregisterRegions
 
       # Set the app link routing
       if @settings.routeLinks
@@ -933,6 +907,39 @@ define 'chaplin/views/layout', [
 
       return
 
+    # Region management
+    # -----------------
+
+    # Registering one region; namespaced by cid
+    registerRegion: (instance, name, selector) =>
+      @regions.push
+        name: name
+        cid: instance.cid
+        selector: selector
+
+    # Triggered by view; passed in the region registration method
+    # Simply register all regions exposed by it
+    registerRegions: (instance) ->
+      if instance.regions?
+        instance.regions _.partial @registerRegion, instance
+
+    # When views are disposed; remove all their registered regions
+    unregisterRegions: (instance) ->
+      @regions = _(@regions).reject (region) -> region.cid is instance.cid
+
+    # When views are instantiated and request for a region assignment;
+    # attempt to fulfil it.
+    applyRegion: (name, instance) ->
+      # Find an appropriate region
+      region = _.find @regions, (region) -> region.name is name
+
+      # Assert that we got a valid region
+      if _.isUndefined region
+        throw new Error "No region registed under #{name}"
+
+      # Apply the region selector
+      instance.container = region.selector
+
     # Disposal
     # --------
 
@@ -996,6 +1003,13 @@ define 'chaplin/views/view', [
     subviews: null
     subviewsByName: null
 
+    # State
+    # -----
+
+    # A view is `stale` when it has been previously composed by the last
+    # route but has not yet been composed by the current route.
+    stale: false
+
     # Method wrapping to enable `afterRender` and `afterInitialize`
     # -------------------------------------------------------------
 
@@ -1053,11 +1067,12 @@ define 'chaplin/views/view', [
       if @model or @collection
         @modelBind 'dispose', @dispose
 
-      #!!
       # Attempt to apply a named region
       if options?.region?
         @publishEvent '!region:apply', options.region, @
-      #!!
+
+      # Register all exposed regions
+      @publishEvent '!region:register', @
 
       # Call `afterInitialize` if `initialize` was not wrapped
       unless @initializeIsWrapped
@@ -1321,6 +1336,9 @@ define 'chaplin/views/view', [
 
     dispose: ->
       return if @disposed
+
+      # Let everyone know we're being disposed
+      @publishEvent 'view:dispose:before', this
 
       # Dispose subviews
       subview.dispose() for subview in @subviews
