@@ -147,17 +147,20 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       return this.subscribeEvent('!startupController', this.startupController);
     };
 
-    Dispatcher.prototype.matchRoute = function(route, params) {
-      return this.startupController(route.controller, route.action, params);
+    Dispatcher.prototype.matchRoute = function(route, params, options) {
+      return this.startupController(route.controller, route.action, params, options);
     };
 
-    Dispatcher.prototype.startupController = function(controllerName, action, params) {
+    Dispatcher.prototype.startupController = function(controllerName, action, params, options) {
       var handler, isSameController;
       if (action == null) {
         action = 'index';
       }
       if (params == null) {
         params = {};
+      }
+      if (options == null) {
+        options = {};
       }
       if (params.changeURL !== false) {
         params.changeURL = true;
@@ -169,7 +172,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       if (isSameController) {
         return;
       }
-      handler = _(this.controllerLoaded).bind(this, controllerName, action, params);
+      handler = _(this.controllerLoaded).bind(this, controllerName, action, params, options);
       return this.loadController(controllerName, handler);
     };
 
@@ -184,7 +187,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       }
     };
 
-    Dispatcher.prototype.controllerLoaded = function(controllerName, action, params, ControllerConstructor) {
+    Dispatcher.prototype.controllerLoaded = function(controllerName, action, params, options, ControllerConstructor) {
       var controller, currentController, currentControllerName;
       currentControllerName = this.currentControllerName || null;
       currentController = this.currentController || null;
@@ -202,7 +205,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
       this.currentController = controller;
       this.currentAction = action;
       this.currentParams = params;
-      this.adjustURL(controller, params);
+      this.adjustURL(controller, _(params).extend(options));
       return this.publishEvent('startupController', {
         previousControllerName: this.previousControllerName,
         controller: this.currentController,
@@ -223,7 +226,7 @@ define('chaplin/dispatcher', ['underscore', 'backbone', 'chaplin/lib/utils', 'ch
         throw new Error('Dispatcher#adjustURL: controller for ' + ("" + this.currentControllerName + " does not provide a historyURL"));
       }
       if (params.changeURL) {
-        this.publishEvent('!router:changeURL', url);
+        this.publishEvent('!router:changeURL', url, params);
       }
       return this.url = url;
     };
@@ -277,7 +280,9 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
       check = _.find(this.compositions, function(c) {
         return c.type === type && _.isEqual(c.options, options);
       });
-      if (_.isUndefined(check)) {
+      if (check != null) {
+        return check.instance.stale = false;
+      } else {
         composition = {
           type: type,
           options: _.clone(options)
@@ -287,8 +292,6 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
           composition.instance.render();
         }
         return this.compositions.push(composition);
-      } else {
-        return check.instance.stale = false;
       }
     };
 
@@ -300,12 +303,12 @@ define('chaplin/composer', ['underscore', 'backbone', 'chaplin/lib/utils', 'chap
         _results = [];
         for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
           composition = _ref[index];
-          if (!composition.instance.stale) {
-            composition.instance.stale = true;
-            _results.push(composition);
-          } else {
+          if (composition.instance.stale) {
             composition.instance.dispose();
             continue;
+          } else {
+            composition.instance.stale = true;
+            _results.push(composition);
           }
         }
         return _results;
@@ -650,7 +653,7 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
       this.subscribeEvent('startupController', this.adjustTitle);
       this.subscribeEvent('!region:apply', this.applyRegion);
       this.subscribeEvent('!region:register', this.registerRegions);
-      this.subscribeEvent('view:dispose:before', this.unregisterRegions);
+      this.subscribeEvent('view:dispose', this.unregisterRegions);
       if (this.settings.routeLinks) {
         this.startLinkRouting();
       }
@@ -757,8 +760,8 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
 
     Layout.prototype.registerRegion = function(instance, name, selector) {
       return this.regions.push({
+        instance: instance,
         name: name,
-        cid: instance.cid,
         selector: selector
       });
     };
@@ -771,14 +774,14 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
 
     Layout.prototype.unregisterRegions = function(instance) {
       return this.regions = _(this.regions).reject(function(region) {
-        return region.cid === instance.cid;
+        return region.instance.cid === instance.cid;
       });
     };
 
     Layout.prototype.applyRegion = function(name, instance) {
       var region;
       region = _.find(this.regions, function(region) {
-        return region.name === name;
+        return region.name === name && !instance.stale;
       });
       if (_.isUndefined(region)) {
         throw new Error("No region registed under " + name);
@@ -792,6 +795,8 @@ define('chaplin/views/layout', ['jquery', 'underscore', 'backbone', 'chaplin/lib
       if (this.disposed) {
         return;
       }
+      this.regions = this.regions.slice(0);
+      delete this.regions;
       this.stopLinkRouting();
       this.unsubscribeAllEvents();
       this.undelegateEvents();
@@ -820,6 +825,10 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
     View.prototype.container = null;
 
     View.prototype.containerMethod = 'append';
+
+    View.prototype.regions = null;
+
+    View.prototype.region = null;
 
     View.prototype.subviews = null;
 
@@ -857,7 +866,7 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
     View.prototype.initialize = function(options) {
       var prop, _i, _len, _ref;
       if (options) {
-        _ref = ['autoRender', 'container', 'containerMethod'];
+        _ref = ['autoRender', 'container', 'containerMethod', 'region'];
         for (_i = 0, _len = _ref.length; _i < _len; _i++) {
           prop = _ref[_i];
           if (options[prop] != null) {
@@ -870,8 +879,8 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
       if (this.model || this.collection) {
         this.modelBind('dispose', this.dispose);
       }
-      if ((options != null ? options.region : void 0) != null) {
-        this.publishEvent('!region:apply', options.region, this);
+      if (this.region != null) {
+        this.publishEvent('!region:apply', region, this);
       }
       this.publishEvent('!region:register', this);
       if (!this.initializeIsWrapped) {
@@ -1073,7 +1082,7 @@ define('chaplin/views/view', ['jquery', 'underscore', 'backbone', 'chaplin/lib/u
       if (this.disposed) {
         return;
       }
-      this.publishEvent('view:dispose:before', this);
+      this.publishEvent('view:dispose', this);
       _ref = this.subviews;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         subview = _ref[_i];
@@ -1511,7 +1520,7 @@ define('chaplin/lib/route', ['underscore', 'backbone', 'chaplin/lib/event_broker
     Route.prototype.handler = function(path, options) {
       var params;
       params = this.buildParams(path, options);
-      return this.publishEvent('matchRoute', this, params);
+      return this.publishEvent('matchRoute', this, params, options);
     };
 
     Route.prototype.buildParams = function(path, options) {
@@ -1631,36 +1640,50 @@ define('chaplin/lib/router', ['underscore', 'backbone', 'chaplin/mediator', 'cha
       return route;
     };
 
-    Router.prototype.route = function(path) {
+    Router.prototype.route = function(path, options) {
       var handler, _i, _len, _ref;
+      if (options == null) {
+        options = {};
+      }
+      _(options).defaults({
+        changeURL: true
+      });
       path = path.replace(/^(\/#|\/)/, '');
       _ref = Backbone.history.handlers;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         handler = _ref[_i];
         if (handler.route.test(path)) {
-          handler.callback(path, {
-            changeURL: true
-          });
+          handler.callback(path, options);
           return true;
         }
       }
       return false;
     };
 
-    Router.prototype.routeHandler = function(path, callback) {
-      var routed;
-      routed = this.route(path);
+    Router.prototype.routeHandler = function(path, options, callback) {
+      var routed, _ref;
+      if (arguments.length === 2) {
+        _ref = [options, {}], callback = _ref[0], options = _ref[1];
+      }
+      routed = this.route(path, options);
       return typeof callback === "function" ? callback(routed) : void 0;
     };
 
-    Router.prototype.changeURL = function(url) {
-      return Backbone.history.navigate(url, {
+    Router.prototype.changeURL = function(url, options) {
+      if (options == null) {
+        options = {};
+      }
+      _(options).defaults({
         trigger: false
       });
+      return Backbone.history.navigate(url, options);
     };
 
-    Router.prototype.changeURLHandler = function(url) {
-      return this.changeURL(url);
+    Router.prototype.changeURLHandler = function(url, options) {
+      if (options == null) {
+        options = {};
+      }
+      return this.changeURL(url, options);
     };
 
     Router.prototype.disposed = false;
@@ -1886,7 +1909,7 @@ define('chaplin/lib/utils', ['chaplin/lib/support'], function(support) {
   return utils;
 });
 
-define('chaplin', ['chaplin/application', 'chaplin/mediator', 'chaplin/dispatcher', 'chaplin/controllers/controller', 'chaplin/models/collection', 'chaplin/models/model', 'chaplin/views/layout', 'chaplin/views/view', 'chaplin/views/collection_view', 'chaplin/lib/route', 'chaplin/lib/router', 'chaplin/lib/event_broker', 'chaplin/lib/support', 'chaplin/lib/sync_machine', 'chaplin/lib/utils', 'chaplin/composer'], function(Application, mediator, Dispatcher, Controller, Collection, Model, Layout, View, CollectionView, Route, Router, EventBroker, support, SyncMachine, utils, Composer) {
+define('chaplin', ['chaplin/application', 'chaplin/mediator', 'chaplin/dispatcher', 'chaplin/composer', 'chaplin/controllers/controller', 'chaplin/models/collection', 'chaplin/models/model', 'chaplin/views/layout', 'chaplin/views/view', 'chaplin/views/collection_view', 'chaplin/lib/route', 'chaplin/lib/router', 'chaplin/lib/event_broker', 'chaplin/lib/support', 'chaplin/lib/sync_machine', 'chaplin/lib/utils'], function(Application, mediator, Dispatcher, Composer, Controller, Collection, Model, Layout, View, CollectionView, Route, Router, EventBroker, support, SyncMachine, utils) {
   return {
     Application: Application,
     mediator: mediator,
